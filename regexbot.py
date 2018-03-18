@@ -11,27 +11,37 @@ starterbot_id = None
 # constants
 RTM_READ_DELAY = 0.1 # 1 second delay between reading from RTM
 
+raw_regex_dict = {
+    r"^hello (<@[^>]*>)$": r"hello \1, I'm regex bot",
+}
 
+compiled_regex_dict = {}
 
 def handle_message(slack_event):
     message_text = slack_event["text"]
     message_channel = slack_event["channel"]
 
-    # TODO: regex processing here
+    for source_regex, destination_regex in compiled_regex_dict.items():
+        if source_regex.search(message_text):
+            new_message = re.sub(source_regex, destination_regex, message_text)
 
-    slack_client.api_call(
-        "chat.postMessage",
-        channel=message_channel,
-        text=message_text
-    )
+            slack_client.api_call(
+                "chat.postMessage",
+                channel=message_channel,
+                text=new_message
+            )
+            return
 
 def handle_next_events(slack_events):
     for event in slack_events:
         if event["type"] == "message" and not "subtype" in event and "text" in event:
             handle_message(event)
 
-
 if __name__ == "__main__":
+    print("Initialising regexes")
+    for regex, result in raw_regex_dict.items():
+        compiled_regex_dict[re.compile(regex)] = result
+
     if slack_client.rtm_connect(with_team_state=False):
         print("Starter Bot connected and running!")
         # Read bot's user ID by calling Web API method `auth.test`
