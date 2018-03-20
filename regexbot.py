@@ -25,20 +25,28 @@ slack_client = SlackClient(slack_bot_token)
 # starterbot's user ID in Slack: value is assigned after the bot starts up
 starterbot_id = None
 
-RTM_READ_DELAY = 0.1 # 0.1 second delay between reading from RTM
+RTM_READ_DELAY = 0.01 # 0.1 second delay between reading from RTM
+MAX_LENGTH = 256
 
 compiled_regex_dict = {}
 
 def load_regexes():
+    sheet_client.clear_status()
     raw_regex_list = sheet_client.get_regexes()
     for i, row in enumerate(raw_regex_list):
+        sheet_client.update_status(i + 2, "Checking")
         message = "Accepted"
-        if len(row) < 2 or len(row[0]) == 0 or len(row[1]) == 0:
+        if len(row) >= 2 and len(row[0].strip()) == 0 and len(row[1].strip()) == 0:
+            message = ""
+        elif len(row) < 2 or len(row[0].strip()) == 0 or len(row[1].strip()) == 0:
             message = "Empty Cell"
+        elif len(row[0].strip()) > MAX_LENGTH or len(row[1].strip()) > MAX_LENGTH:
+            print(len(row[0].strip()), len(row[1].strip()))
+            message = "Regex too long: " + str(len(row[0].strip())) + ", " + str(len(row[1].strip())) + ", maximum is " + str(MAX_LENGTH)
         else:
+            source_regex = row[0].strip()
+            destination_regex = row[1].strip()
             try:
-                source_regex = row[0]
-                destination_regex = row[1]
                 compiled_regex_dict[re.compile(source_regex)] = destination_regex
             except re.error as e:
                 message = "Error"

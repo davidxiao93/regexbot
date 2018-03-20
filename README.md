@@ -13,6 +13,7 @@ Setup:
 
 Usage:
 - Populate a google sheet with your source and destination regexes.
+  - Sheet name is "Data"
   - Column A -> Source regex. Messages will be matched against this
   - Column B -> Destination regex. Responses will be created with this. 
     - Use \n for regex group n
@@ -20,3 +21,6 @@ Usage:
     - You should not manually modify this column. Regexbot will overwrite all values upon reloading
 - Start the script
 - In Slack, call the command "@regexbot reload" to make regexbot reload the google sheet when desired. 
+
+Notes
+- A regex limit of 256 is in place to ensure that the messages generated aren't stupidly long

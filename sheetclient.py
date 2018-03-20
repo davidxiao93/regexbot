@@ -36,13 +36,13 @@ class SheetClient:
             return self.cached_regexes
 
         # Need to refresh
-        range_name = 'A2:B'
+        range_name = 'Data!A2:B'
         result = self.service.spreadsheets().values().get(
             spreadsheetId = self.sheet_id,
-            range = range_name
+            range = range_name,
+            valueRenderOption = "FORMULA"
         ).execute()
         values = result.get('values', [])
-
         return_list = []
         if not values:
             print("WARNING: No regexes")
@@ -54,7 +54,7 @@ class SheetClient:
         return return_list
 
     def update_status(self, row, message):
-        range_name = 'C' + str(row)
+        range_name = 'Data!C' + str(row)
         self.service.spreadsheets().values().update(
             spreadsheetId = self.sheet_id,
             range = range_name,
@@ -62,6 +62,13 @@ class SheetClient:
             valueInputOption = "USER_ENTERED"
         ).execute()
 
+    def clear_status(self):
+        range_name = 'Data!C1:C'
+        self.service.spreadsheets().values().clear(
+            spreadsheetId=self.sheet_id,
+            range=range_name,
+            body={}
+        ).execute()
 
     def __get_credentials(self):
         """Gets valid user credentials from storage.
