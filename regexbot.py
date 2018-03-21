@@ -28,7 +28,6 @@ starterbot_id = None
 
 RTM_READ_DELAY = 0.01 # 0.1 second delay between reading from RTM
 MAX_LENGTH = 128
-MAX_NUMBER_OF_REGEXES = 100
 
 compiled_regex_list = []
 
@@ -37,13 +36,13 @@ def load_regexes():
     compiled_regex_list = []
     sheet_client.clear_status()
     raw_regex_list = sheet_client.get_regexes()
+
     regex_dict = {}
     compiled_regex_count = 0
+    sheet_client.update_status(["Checking"] * len(raw_regex_list))
+    message_list = []
     for i, row in enumerate(raw_regex_list):
-        sheet_client.update_status(i + 2, "Checking")
         message = "Accepted"
-        if compiled_regex_count > MAX_NUMBER_OF_REGEXES:
-            message = "Too many regexes in sheet"
         if len(row) >= 2 and len(row[0].strip()) == 0 and len(row[1].strip()) == 0:
             message = ""
         elif len(row) < 2 or len(row[0].strip()) == 0 or len(row[1].strip()) == 0:
@@ -55,13 +54,16 @@ def load_regexes():
             destination_regex = row[1].strip()
             try:
                 compiled_regex = re.compile(source_regex)
+                # TODO: add a sanity check to the destination regex
+                # re.compile(destination_regex) # check that the destination regex is valid too. dont do anything with it though
                 if compiled_regex not in regex_dict:
                     regex_dict[compiled_regex] = []
                     compiled_regex_count += 1
                 regex_dict[compiled_regex].append(destination_regex)
             except re.error as e:
                 message = "Error compiling regex"
-        sheet_client.update_status(i+2, message)
+        message_list.append(message)
+    sheet_client.update_status(message_list)
     for compiled_regex, destination_regexes in regex_dict.items():
         compiled_regex_list.append((compiled_regex, destination_regexes))
 
@@ -75,9 +77,12 @@ def handle_message(slack_event):
 
     for source_regex, destination_regexes in compiled_regex_list:
         try:
-            if source_regex.search(message_text):
-                new_message = re.sub(source_regex, random.choice(destination_regexes), message_text)
-
+            maybe_match = source_regex.search(message_text)
+            if maybe_match:
+                new_message = re.sub(source_regex, random.choice(destination_regexes), maybe_match.group(0))
+                # TODO: come up with a better solution than a hard cut off
+                if len(new_message) > 200:
+                    new_message = new_message[:200]
                 slack_client.api_call(
                     "chat.postMessage",
                     channel=message_channel,

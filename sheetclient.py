@@ -53,12 +53,16 @@ class SheetClient:
         self.cache_expires = now+1000 # cache expires in one second
         return return_list
 
-    def update_status(self, row, message):
-        range_name = 'Data!C' + str(row)
+    def update_status(self, message_list):
+        range_name = 'Data!C2:C' + str(len(message_list) + 1)
         self.service.spreadsheets().values().update(
             spreadsheetId = self.sheet_id,
             range = range_name,
-            body = {"range": range_name,"values": [ [ message ] ]},
+            body = {
+                "range": range_name,
+                "values": [ message_list ],
+                "majorDimension": "COLUMNS"
+            },
             valueInputOption = "USER_ENTERED"
         ).execute()
 
