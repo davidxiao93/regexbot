@@ -12,6 +12,7 @@ RTM_READ_DELAY = 0.1 # 0.1 second delay between reading from RTM
 MAX_LENGTH = 2048
 SNIPPET_CHAR_THRESHOLD = 512
 SNIPPET_LINE_THRESHOLD = 8
+RETRY_SENDS = 10
 
 class RegexBot:
 
@@ -67,6 +68,39 @@ class RegexBot:
         for compiled_regex, destination_regexes in regex_dict.items():
             self.compiled_regex_list.append((compiled_regex, destination_regexes))
 
+    def handle_response(self, response):
+        if response["ok"] is False and response["headers"]["Retry-After"]:
+            # The `Retry-After` header will tell you how long to wait before retrying
+            delay = int(response["headers"]["Retry-After"])
+            print("Rate limited. Retrying in " + str(delay) + " seconds")
+            time.sleep(delay)
+            return False
+        return True
+
+    def send_message(self, channel, message, is_plain):
+        if is_plain:
+            return self.slack_client.api_call(
+                "chat.postMessage",
+                channel=channel,
+                text=message
+            )
+
+        else:
+            return self.slack_client.api_call(
+                "files.upload",
+                channels=channel,
+                content=message
+            )
+
+    def retryable_send_message(self, channel, message, is_plain):
+        got_successful_response = False
+        attempts = 0
+        while not got_successful_response:
+            got_successful_response = self.handle_response(self.send_message(channel, message, is_plain))
+            if attempts > RETRY_SENDS:
+                print("Failed to send message after", RETRY_SENDS, "attempts!")
+                break
+
     def handle_message(self, slack_event):
         message_text = slack_event["text"]
         message_channel = slack_event["channel"]
@@ -80,23 +114,10 @@ class RegexBot:
                 maybe_match = source_regex.search(message_text)
                 if maybe_match:
                     new_message = re.sub(source_regex, random.choice(destination_regexes), maybe_match.group(0))
-                    if len(new_message) < SNIPPET_CHAR_THRESHOLD and len(new_message.split('\n')) < SNIPPET_LINE_THRESHOLD:
-                        # Sensible size, post as normal message
-                        self.slack_client.api_call(
-                            "chat.postMessage",
-                            channel=message_channel,
-                            text=new_message
-                        )
-                    else:
-                        # Post as snippet
-                        self.slack_client.api_call(
-                            "files.upload",
-                            channels=message_channel,
-                            content=new_message
-                        )
+                    self.retryable_send_message(message_channel, new_message, len(new_message) < SNIPPET_CHAR_THRESHOLD and len(new_message.split('\n')) < SNIPPET_LINE_THRESHOLD)
                     return
             except re.error as e:
-                print("Error!", e)
+                print("Regex Error!", e)
                 continue
 
     def handle_next_events(self, slack_events):
