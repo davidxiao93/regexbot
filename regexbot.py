@@ -77,7 +77,10 @@ class RegexBot:
             return False
         return True
 
-    def send_message(self, channel, message, is_plain, thread_ts):
+    def send_message(self, channel, message, is_plain, original_event):
+        thread_ts = None
+        if "thread_ts" in original_event:
+            thread_ts = original_event["thread_ts"]
         if thread_ts is None:
             if is_plain:
                 return self.slack_client.api_call(
@@ -93,21 +96,41 @@ class RegexBot:
                     content=message
                 )
         else:
-            message_to_send = message
-            if not is_plain:
-                message_to_send = "Cannot send Snippets in a Thread. This is a Slack limitation"
-            return self.slack_client.api_call(
-                "chat.postMessage",
-                channel=channel,
-                text=message_to_send,
-                thread_ts=thread_ts
-            )
 
-    def retryable_send_message(self, channel, message, is_plain, thread_ts):
+            if not is_plain:
+                message = "Cannot send Snippets in a Thread. This is a Slack limitation"
+                return self.slack_client.api_call(
+                    "chat.postEphemeral",
+                    channel=channel,
+                    text=message,
+                    user=original_event["user"]
+                )
+
+            else:
+                reply_broadcast = None
+                if "reply_broadcast" in original_event:
+                    reply_broadcast = original_event["reply_broadcast"]
+                if reply_broadcast is None:
+                    return self.slack_client.api_call(
+                        "chat.postMessage",
+                        channel=channel,
+                        text=message,
+                        thread_ts=thread_ts
+                    )
+                else:
+                    return self.slack_client.api_call(
+                        "chat.postMessage",
+                        channel=channel,
+                        text=message,
+                        thread_ts=thread_ts,
+                        reply_broadcast=reply_broadcast
+                    )
+
+    def retryable_send_message(self, channel, message, is_plain, original_event):
         got_successful_response = False
         attempts = 0
         while not got_successful_response:
-            got_successful_response = self.handle_response(self.send_message(channel, message, is_plain, thread_ts))
+            got_successful_response = self.handle_response(self.send_message(channel, message, is_plain, original_event))
             if attempts > RETRY_SENDS:
                 print("Failed to send message after", RETRY_SENDS, "attempts!")
                 break
@@ -126,10 +149,7 @@ class RegexBot:
                 if maybe_match:
                     new_message = re.sub(source_regex, random.choice(destination_regexes), maybe_match.group(0))
                     is_plain_message = len(new_message) < SNIPPET_CHAR_THRESHOLD and len(new_message.split('\n')) < SNIPPET_LINE_THRESHOLD
-                    thread_ts = None
-                    if "thread_ts" in slack_event:
-                        thread_ts = slack_event["thread_ts"]
-                    self.retryable_send_message(message_channel, new_message, is_plain_message, thread_ts)
+                    self.retryable_send_message(message_channel, new_message, is_plain_message, slack_event)
                     return
             except re.error as e:
                 print("Regex Error!", e)
