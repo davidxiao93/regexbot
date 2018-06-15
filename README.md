@@ -15,9 +15,11 @@ Usage:
 - Populate a google sheet with your source and destination regexes.
   - Sheet name is "Data"
   - Column A -> Source regex. Messages will be matched against this
-  - Column B -> Destination regex. Responses will be created with this. 
+  - Column B -> Source channel. Regexbot will only respond if the messaage it sees matches one of the channels listed here. Blank for any channel. Parameters should be the channels name without the #. It is comma seperated
+  - Column C -> Source user. Regexbot will only respond if the message it sees matches one of the users listed here. Blank for any user. Parameters should be the person's username without the @. It is comma seperated
+  - Column D -> Destination regex. Responses will be created with this. 
     - Use \n for regex group n
-  - Column C -> Status. Given by regexbot and will indicate to you if the regex was successfully compiled. 
+  - Column E -> Status. Given by regexbot and will indicate to you if the regex was successfully compiled. 
     - You should not manually modify this column. Regexbot will overwrite all values upon reloading
 - Start the script
 - In Slack, call the command "@regexbot reload" to make regexbot reload the google sheet when desired. 
