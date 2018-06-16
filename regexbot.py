@@ -5,7 +5,7 @@ from slackclient import SlackClient
 from sheetclient import SheetClient
 
 import pprint
-pp = pprint.PrettyPrinter(indent=4)
+pp = pprint.PrettyPrinter(indent=4, width=120)
 import random
 
 RTM_READ_DELAY = 0.1 # 0.1 second delay between reading from RTM
@@ -18,13 +18,15 @@ SOURCE_REGEX = 0
 SOURCE_CHANNEL = 1
 SOURCE_USER = 2
 DESTINATION_REGEX = 3
+DESTINATION_ICON = 4
+DESTINATION_NAME = 5
 
-VERBOSE_LOGGING = False
+VERBOSE_LOGGING = True
 
 class RegexBot:
 
     def __init__(self, sheet_id, slack_bot_token):
-        self.sheet_client = SheetClient(sheet_id)
+        self.sheet_client = SheetClient(sheet_id, 'A', 'F', 'G')
         self.slack_client = SlackClient(slack_bot_token)
         self.slack_bot_id = None
         self.compiled_regex_list = []
@@ -58,7 +60,7 @@ class RegexBot:
                 return key
         return None
 
-    def check_input(self, lookup_dict, message, input):
+    def check_input_against_dict(self, lookup_dict, message, input):
         source_inputs = []
         unrecognised_inputs = []
         for split_input in input:
@@ -92,15 +94,23 @@ class RegexBot:
                 message = "Regex too long: " + str(len(row[SOURCE_REGEX].strip())) + ", " + str(len(row[DESTINATION_REGEX].strip())) + ", maximum is " + str(MAX_LENGTH)
             else:
                 source_regex = row[SOURCE_REGEX].strip()
-                message, source_conversations = self.check_input(self.conversation_dict, message, row[SOURCE_CHANNEL].split(','))
-                message, source_users = self.check_input(self.user_dict, message, row[SOURCE_USER].split(','))
+                message, source_conversations = self.check_input_against_dict(self.conversation_dict, message, row[SOURCE_CHANNEL].split(','))
+                message, source_users = self.check_input_against_dict(self.user_dict, message, row[SOURCE_USER].split(','))
                 destination_regex = row[DESTINATION_REGEX].strip()
+                destination = {}
+                if len(row) > DESTINATION_ICON and len(row[DESTINATION_ICON].strip()) != 0:
+                    destination["user_icon"] = row[DESTINATION_ICON]
+                if len(row) > DESTINATION_NAME and len(row[DESTINATION_NAME].strip()) != 0:
+                    destination["user_name"] = row[DESTINATION_NAME]
                 try:
                     compiled_regex = re.compile(source_regex)
                     if compiled_regex not in regex_dict:
                         regex_dict[compiled_regex] = []
                         compiled_regex_count += 1
-                    regex_dict[compiled_regex].append((source_conversations, source_users, destination_regex))
+                    destination["conversations"] = source_conversations
+                    destination["users"] = source_users
+                    destination["regex"] = destination_regex
+                    regex_dict[compiled_regex].append(destination)
                 except re.error as e:
                     message = "Error compiling regex"
             message_list.append(message)
@@ -109,11 +119,16 @@ class RegexBot:
             self.compiled_regex_list.append((compiled_regex, potential_destinations))
 
     def load_conversations(self):
+        params = {
+            "exclude_archived": True,
+            "types": 'public_channel,private_channel'
+        }
         conversations_list = self.slack_client.api_call(
             "conversations.list",
-            exclude_archived=True,
-            types='public_channel,private_channel'
+            timeout=None,
+            **params
         )['channels']
+
         for conversation in conversations_list:
             if conversation['is_member']:
                 self.conversation_dict[conversation['id']] = conversation['name']
@@ -139,67 +154,80 @@ class RegexBot:
             return False
         return True
 
-    def send_message(self, channel, message, is_plain, original_event):
-        thread_ts = None
+    # good enough approximation
+    def is_emoji(self, input):
+        return len(input) > 2 and input[0] == ':' and input[-1] == ':'
+
+    # good enough approximation
+    def is_html(self, input):
+        return len(input) > 4 and input[0:4] == 'http'
+
+    def send_message(self, channel, message_settings, original_event):
+        message = message_settings["message"]
+        is_plain = message_settings["is_plain"]
+
+        if VERBOSE_LOGGING:
+            pp.pprint("sent:")
+            pp.pprint(message_settings)
+        method = "chat.postMessage"
+        params = {
+            "channel": channel
+        }
+
+        if "user_icon" in message_settings:
+            if self.is_emoji(message_settings["user_icon"]):
+                params["icon_emoji"] = message_settings["user_icon"]
+            elif self.is_html(message_settings["user_icon"]):
+                params["icon_url"] = message_settings["user_icon"]
+        if "user_name" in message_settings:
+            params["username"] = message_settings["user_name"]
+
         if "thread_ts" in original_event:
-            thread_ts = original_event["thread_ts"]
-        if thread_ts is None:
+            params["text"] = message
             if is_plain:
-                return self.slack_client.api_call(
-                    "chat.postMessage",
-                    channel=channel,
-                    text=message
-                )
-
+                params["thread_ts"] = original_event["thread_ts"]
             else:
-                return self.slack_client.api_call(
-                    "files.upload",
-                    channels=channel,
-                    content=message
-                )
+                method = "chat.postEphemeral"
+                params["text"] = "Cannot send Snippets in a Thread. This is a Slack limitation"
+                params["user"] = original_event["user"]
+                if "icon_emoji" in params:
+                    params.pop("icon_emoji")
+                if "icon_url" in params:
+                    params.pop("icon_url")
+                if "username" in params:
+                    params.pop("username")
+
         else:
-            if not is_plain:
-                message = "Cannot send Snippets in a Thread. This is a Slack limitation"
-                return self.slack_client.api_call(
-                    "chat.postEphemeral",
-                    channel=channel,
-                    text=message,
-                    user=original_event["user"]
-                )
-
+            if is_plain:
+                params["text"] = message
             else:
-                reply_broadcast = None
-                if "reply_broadcast" in original_event:
-                    reply_broadcast = original_event["reply_broadcast"]
-                if reply_broadcast is None:
-                    return self.slack_client.api_call(
-                        "chat.postMessage",
-                        channel=channel,
-                        text=message,
-                        thread_ts=thread_ts
-                    )
-                else:
-                    return self.slack_client.api_call(
-                        "chat.postMessage",
-                        channel=channel,
-                        text=message,
-                        thread_ts=thread_ts,
-                        reply_broadcast=reply_broadcast
-                    )
+                method = "files.upload"
+                if "channel" in params:
+                    params.pop("channel")
+                params["channels"] = channel
+                params["content"] = message
 
-    def retryable_send_message(self, channel, message, is_plain, original_event):
+
+        return self.slack_client.api_call(
+            method,
+            timeout=None,
+            **params
+        )
+
+
+    def retryable_send_message(self, channel, message_settings, original_event):
         got_successful_response = False
         attempts = 0
         while not got_successful_response:
-            got_successful_response = self.handle_response(self.send_message(channel, message, is_plain, original_event))
+            got_successful_response = self.handle_response(self.send_message(channel, message_settings, original_event))
             if attempts > RETRY_SENDS:
                 print("Failed to send message after", RETRY_SENDS, "attempts!")
                 break
 
     def makeFilter(self, message_channel, message_user):
         def destinationFilter(possible_destination):
-            source_channel_list = possible_destination[0]
-            source_user_list = possible_destination[1]
+            source_channel_list = possible_destination["conversations"]
+            source_user_list = possible_destination["users"]
 
             if len(source_channel_list) != 0:
                 if message_channel not in source_channel_list:
@@ -231,11 +259,20 @@ class RegexBot:
                     if len(filtered_destinations) == 0:
                         continue
                     selected_destination = random.choice(filtered_destinations)
-                    source_conversations, source_users, destination_regex = selected_destination
-
+                    destination_regex = selected_destination["regex"]
                     new_message = re.sub(source_regex, destination_regex, maybe_match.group(0))
                     is_plain_message = len(new_message) < SNIPPET_CHAR_THRESHOLD and len(new_message.split('\n')) < SNIPPET_LINE_THRESHOLD
-                    self.retryable_send_message(message_channel, new_message, is_plain_message, slack_event)
+
+                    message_settings = {
+                        "message": new_message,
+                        "is_plain": is_plain_message,
+                    }
+                    if "user_icon" in selected_destination:
+                        message_settings["user_icon"] = selected_destination["user_icon"]
+                    if "user_name" in selected_destination:
+                        message_settings["user_name"] = selected_destination["user_name"]
+
+                    self.retryable_send_message(message_channel, message_settings, slack_event)
                     return
             except re.error as e:
                 print("Regex Error!", e)
@@ -244,6 +281,7 @@ class RegexBot:
     def handle_next_events(self, slack_events):
         for event in slack_events:
             if VERBOSE_LOGGING:
+                pp.pprint("Received event")
                 pp.pprint(event)
             if event["type"] == "message" and not "subtype" in event and "text" in event:
                 self.handle_message(event)

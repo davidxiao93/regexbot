@@ -18,14 +18,13 @@ SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Regexbot'
 
-START_COLUMN = 'A'
-END_COLUMN = 'D'
-STATUS_COLUMN = 'E'
-
 class SheetClient:
-    def __init__(self, sheet_id):
+    def __init__(self, sheet_id, start_column, end_column, status_column):
         self.credentials = self.__get_credentials()
         self.sheet_id = sheet_id
+        self.start_column = start_column
+        self.end_column = end_column
+        self.status_column = status_column
         http = self.credentials.authorize(httplib2.Http())
         discoveryUrl = ('https://sheets.googleapis.com/$discovery/rest?version=v4')
         self.service = discovery.build('sheets', 'v4', http=http, discoveryServiceUrl=discoveryUrl)
@@ -40,7 +39,7 @@ class SheetClient:
             return self.cached_regexes
 
         # Need to refresh
-        range_name = 'Data!' + START_COLUMN + '2:' + END_COLUMN
+        range_name = 'Data!' + self.start_column + '2:' + self.end_column
         result = self.service.spreadsheets().values().get(
             spreadsheetId = self.sheet_id,
             range = range_name,
@@ -58,7 +57,7 @@ class SheetClient:
         return return_list
 
     def update_status(self, message_list):
-        range_name = 'Data!' + STATUS_COLUMN + '2:' + STATUS_COLUMN + str(len(message_list) + 1)
+        range_name = 'Data!' + self.status_column + '2:' + self.status_column + str(len(message_list) + 1)
         self.service.spreadsheets().values().update(
             spreadsheetId = self.sheet_id,
             range = range_name,
@@ -71,7 +70,7 @@ class SheetClient:
         ).execute()
 
     def clear_status(self):
-        range_name = 'Data!' + STATUS_COLUMN + '1:' + STATUS_COLUMN
+        range_name = 'Data!' + self.status_column + '1:' + self.status_column
         self.service.spreadsheets().values().clear(
             spreadsheetId=self.sheet_id,
             range=range_name,
