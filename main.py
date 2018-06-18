@@ -1,4 +1,5 @@
 import os
+import time
 from regexbot import RegexBot
 
 if "SHEET_ID" not in os.environ:
@@ -13,4 +14,11 @@ sheet_id = os.environ.get("SHEET_ID")
 slack_bot_token = os.environ.get("SLACK_BOT_TOKEN")
 
 regexbot = RegexBot(sheet_id, slack_bot_token)
-regexbot.start()
+while True:
+    try:
+        regexbot.start()
+    except Exception as e:
+        print("Exception caught: ")
+        print(e)
+    finally:
+        time.sleep(1)
